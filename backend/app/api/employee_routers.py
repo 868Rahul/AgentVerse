@@ -7,7 +7,7 @@ from ai.tools.oa_tools import get_user_info, get_user_department
 
 employee_router = APIRouter(prefix="/employee", tags=["employee"])
 
-# 新增员工
+# Add an employee
 @employee_router.post("/add", status_code=status.HTTP_201_CREATED)
 async def add_employee(employee: Employee, session: SessionDep):
     try:
@@ -17,7 +17,7 @@ async def add_employee(employee: Employee, session: SessionDep):
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
     
     
-# 获取员工信息
+# Get employee information
 @employee_router.get("/get/{employee_id}", response_model=Employee)    
 async def get_employee(employee_id: int, session: SessionDep):
     employee = await EmployeeRepository.get_employee(session, employee_id)  
@@ -26,13 +26,13 @@ async def get_employee(employee_id: int, session: SessionDep):
     else:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Employee not found")
 
-# 获取所有员工信息
+# Get all employee information
 @employee_router.get("/get_all", response_model=List[Employee])
 async def get_all_employees(session: SessionDep):
     return await EmployeeRepository.get_all_employees(session)
 
 
-# 更新员工信息
+# Update employee information
 @employee_router.put("/update/{employee_id}", response_model=Employee)
 async def update_employee(employee_id: int, employee_data: Employee, session: SessionDep):
     employee = await EmployeeRepository.update_employee(session, employee_id, employee_data)
@@ -41,7 +41,7 @@ async def update_employee(employee_id: int, employee_data: Employee, session: Se
     else:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Employee not found")
     
-# 删除员工信息
+# Delete employee information
 @employee_router.delete("/delete/{employee_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_employee(employee_id: int, session: SessionDep):
     success = await EmployeeRepository.delete_employee(session, employee_id)
@@ -49,7 +49,7 @@ async def delete_employee(employee_id: int, session: SessionDep):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Employee not found")
     
     
-# 获取员工信息通过姓名
+# Get employee information by name
 @employee_router.get("/get_by_name/{name}", response_model=dict)
 async def get_employee_by_name(name: str):
     # employee = await EmployeeRepository.get_employee_by_name(session, name)

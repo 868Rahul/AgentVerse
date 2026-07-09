@@ -17,7 +17,7 @@ const MessageInput: React.FC<MessageInputProps> = ({ input, setInput, handleSend
           onChange={(e) => setInput(e.target.value)}
           placeholder="Send a message..."
           onKeyPress={(e) => e.key === "Enter" && handleSend()}
-          //ctrl + enter 换行
+          // Ctrl + Enter for a new line
           onKeyDown={(e) => {
             if (e.key === "Enter" && e.ctrlKey) {
               e.preventDefault();

@@ -22,7 +22,7 @@ class EmployeeRepository:
         )
         return result.scalars().first()
 
-    ##通过员工名称获取员工信息
+    # Get employee information by employee name
     @classmethod
     async def get_employee_by_name(cls, session: AsyncSession, name: str) -> Employee:
         result = await session.execute(

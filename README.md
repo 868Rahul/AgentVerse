@@ -1,8 +1,7 @@
 <h1 align="center"> AgentVerse </h1>
 <p align="center">
   <strong style="background-color: green;">English</strong>
-  |
-  <a href="./README_zh.md" target="_Self">中文</a>
+  
 </p>
 AgentVerse is a full-stack AI agent chat tool built using components such as langGraph, FastAPI, NextJS, and Chroma.
 

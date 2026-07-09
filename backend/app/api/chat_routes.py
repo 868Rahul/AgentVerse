@@ -57,7 +57,7 @@ async def invoke(user_input: UserInput) -> ChatMessage:
 @chat_router.post("/stream", response_class=StreamingResponse, responses=_sse_response_example())
 async def stream(user_input: StreamInput) -> StreamingResponse:
     """
-    流式传输代理的响应。
+    Stream the agent response.
     
     """
 
