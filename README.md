@@ -1,6 +1,5 @@
 <h1 align="center"> AgentVerse </h1>
 <p align="center">
-  <strong style="background-color: green;">English</strong>
   
 </p>
 AgentVerse is a full-stack AI agent chat tool built using components such as langGraph, FastAPI, NextJS, and Chroma.
