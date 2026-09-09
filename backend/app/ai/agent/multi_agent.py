@@ -8,8 +8,8 @@ from langgraph_supervisor.handoff import create_forward_message_tool
 from dotenv import load_dotenv
 load_dotenv()
 
-from langchain.globals import set_debug
-from langchain.globals import set_verbose
+from langchain_core.globals import set_debug
+from langchain_core.globals import set_verbose
 
 set_debug(True)
 set_verbose(False)

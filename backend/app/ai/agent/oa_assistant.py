@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import cast, Literal
 
-from langchain.prompts import SystemMessagePromptTemplate
+from langchain_core.prompts import SystemMessagePromptTemplate
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig, RunnableLambda, RunnableSerializable
@@ -14,8 +14,8 @@ from ai.llm import get_model, settings
 from ai.tools.oa_tools import get_user_department, get_user_info, search_handbook
 
 
-from langchain.globals import set_debug
-from langchain.globals import set_verbose
+from langchain_core.globals import set_debug
+from langchain_core.globals import set_verbose
 set_debug(True)
 set_verbose(False)
 

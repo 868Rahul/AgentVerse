@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     OLLAMA_BASE_URL: str | None = None
     OLLAMA_MODEL: str | None = None
     
+    GOOGLE_API_KEY: str | None = None
+    
     DEFAULT_MODEL: str | None = None
     
     EMBEDDING_MODEL: str | None = None

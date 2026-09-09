@@ -53,7 +53,20 @@ async def invoke(user_input: UserInput) -> ChatMessage:
         logger.error(f"An exception occurred: {e}")
         raise HTTPException(status_code=500, detail="Unexpected error")
     
-    
+
+def _sse_response_example() -> dict[int, Any]:
+    return {
+        status.HTTP_200_OK: {
+            "description": "Server Sent Event Response",
+            "content": {
+                "text/event-stream": {
+                    "example": "data: {'type': 'token', 'content': 'Hello'}\n\ndata: {'type': 'token', 'content': ' World'}\n\ndata: end\n\n",
+                    "schema": {"type": "string"},
+                }
+            },
+        }
+    }
+
 @chat_router.post("/stream", response_class=StreamingResponse, responses=_sse_response_example())
 async def stream(user_input: StreamInput) -> StreamingResponse:
     """
@@ -116,19 +129,6 @@ async def _handle_input(
 
     return kwargs, run_id
 
-def _sse_response_example() -> dict[int, Any]:
-    return {
-        status.HTTP_200_OK: {
-            "description": "Server Sent Event Response",
-            "content": {
-                "text/event-stream": {
-                    "example": "data: {'type': 'token', 'content': 'Hello'}\n\ndata: {'type': 'token', 'content': ' World'}\n\ndata: end\n\n",
-                    "schema": {"type": "string"},
-                }
-            },
-        }
-    }
-
 
 async def message_generator(
     user_input: StreamInput
@@ -168,8 +168,6 @@ async def message_generator(
                                 update_messages = [update_messages[-1]]
                         else:
                             update_messages = []
-                    if node in ("math_agent", "code_agent"):
-                        update_messages = []
                     new_messages.extend(update_messages)
 
             if stream_mode == "custom":

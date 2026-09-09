@@ -8,6 +8,7 @@ from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI
 from langchain_deepseek import ChatDeepSeek
 from langchain_community.chat_models import ChatTongyi
+from langchain_google_genai import ChatGoogleGenerativeAI
 
 
 
@@ -17,6 +18,7 @@ from ai.models import (
     AllModelEnum,
     DeepseekModelName,
     FakeModelName,
+    GeminiModelName,
     OllamaModelName,
     OpenAIModelName,
     TongYiModelName,
@@ -30,7 +32,8 @@ _MODEL_TABLE = {
     OllamaModelName.OLLAMA_GENERIC: "ollama",
     FakeModelName.FAKE: "fake",
     TongYiModelName.QWEN_PLUS: "qwen-plus",
-
+    GeminiModelName.GEMINI_3_6_FLASH: "gemini-3.6-flash",
+    GeminiModelName.GEMINI_2_5_FLASH: "gemini-2.5-flash",
 
 }
 
@@ -43,7 +46,7 @@ class FakeToolModel(FakeListChatModel):
         return self
 
 ModelT: TypeAlias = (
-    ChatOpenAI | ChatOllama | ChatDeepSeek | FakeToolModel | ChatTongyi
+    ChatOpenAI | ChatOllama | ChatDeepSeek | FakeToolModel | ChatTongyi | ChatGoogleGenerativeAI
 )
 
 
@@ -89,3 +92,10 @@ def get_model(model_name: AllModelEnum, /) -> ModelT:
     
     if model_name in TongYiModelName:
         return ChatTongyi(model=api_model_name, temperature=0.5, streaming=True)
+
+    if model_name in GeminiModelName:
+        return ChatGoogleGenerativeAI(
+            model=api_model_name,
+            temperature=0.5,
+            google_api_key=settings.GOOGLE_API_KEY,
+        )

@@ -27,6 +27,11 @@ class TongYiModelName(StrEnum):
     """TongYi model"""
     QWEN_PLUS = "qwen-plus"
     QWEN_MAX = "qwen-max"
+
+class GeminiModelName(StrEnum):
+    """https://ai.google.dev/gemini-api/docs/models"""
+    GEMINI_3_6_FLASH = "gemini-3.6-flash"
+    GEMINI_2_5_FLASH = "gemini-2.5-flash"
     
 
 
@@ -37,4 +42,5 @@ AllModelEnum: TypeAlias = (
     | OllamaModelName
     | FakeModelName
     | TongYiModelName
+    | GeminiModelName
 )
