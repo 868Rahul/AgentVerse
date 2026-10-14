@@ -1,9 +1,7 @@
 from functools import cache
 from typing import TypeAlias
 
-
-from chromadb.auth import T
-from langchain_community.chat_models import FakeListChatModel, tongyi
+from langchain_community.chat_models import FakeListChatModel
 from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI
 from langchain_deepseek import ChatDeepSeek
@@ -14,6 +12,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 
 
 from core.config import settings
+from ai.resilience import ResilientChatGoogleGenerativeAI, build_rate_limiter
 from ai.models import (
     AllModelEnum,
     DeepseekModelName,
@@ -34,8 +33,13 @@ _MODEL_TABLE = {
     TongYiModelName.QWEN_PLUS: "qwen-plus",
     GeminiModelName.GEMINI_3_6_FLASH: "gemini-3.6-flash",
     GeminiModelName.GEMINI_2_5_FLASH: "gemini-2.5-flash",
+    GeminiModelName.GEMINI_2_5_FLASH_LITE: "gemini-2.5-flash-lite",
 
 }
+
+
+# One throttle for all Gemini models, so agents sharing the free tier quota queue instead of failing
+_gemini_rate_limiter = build_rate_limiter()
 
 
 class FakeToolModel(FakeListChatModel):
@@ -94,8 +98,12 @@ def get_model(model_name: AllModelEnum, /) -> ModelT:
         return ChatTongyi(model=api_model_name, temperature=0.5, streaming=True)
 
     if model_name in GeminiModelName:
-        return ChatGoogleGenerativeAI(
+        return ResilientChatGoogleGenerativeAI(
             model=api_model_name,
             temperature=0.5,
             google_api_key=settings.GOOGLE_API_KEY,
+            fallback_models=settings.gemini_fallback_models(),
+            max_retries=settings.GEMINI_MAX_RETRIES,
+            timeout=settings.GEMINI_TIMEOUT_SECONDS,
+            rate_limiter=_gemini_rate_limiter,
         )

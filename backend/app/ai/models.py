@@ -1,7 +1,7 @@
 from enum import StrEnum
 from typing import TypeAlias
 
-DEFAULT_MODEL = "deepseek-chat"
+DEFAULT_MODEL = "gemini-2.5-flash"
 
 
 class OpenAIModelName(StrEnum):
@@ -32,6 +32,7 @@ class GeminiModelName(StrEnum):
     """https://ai.google.dev/gemini-api/docs/models"""
     GEMINI_3_6_FLASH = "gemini-3.6-flash"
     GEMINI_2_5_FLASH = "gemini-2.5-flash"
+    GEMINI_2_5_FLASH_LITE = "gemini-2.5-flash-lite"
     
 
 

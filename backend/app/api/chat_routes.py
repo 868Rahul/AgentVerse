@@ -13,6 +13,8 @@ from asyncio import CancelledError
 from ai.agent.agents import get_agent, DEFAULT_AGENT, CompiledStateGraph
 from typing import Any, Union, Dict, List, Optional
 from utils.chat_utils import langchain_to_chat_message, remove_tool_calls, convert_message_content_to_string
+from ai.guardrails import check_user_input, redact_output
+from ai.resilience import EMPTY_RESPONSE_MESSAGE, user_facing_error
 from collections.abc import AsyncGenerator
 import json
 
@@ -29,6 +31,10 @@ async def invoke(user_input: UserInput) -> ChatMessage:
     If no agent_id is provided, the default proxy will be used.
     Use thread_id to persist and continue multi-turn dialogues. The run_id keyword argument will also be attached to the message for recording feedback.
     """
+    guard = check_user_input(user_input.message)
+    if not guard.allowed:
+        return ChatMessage(type="ai", content=guard.message)
+
     agent: CompiledStateGraph = get_agent(user_input.agent_id)
     
     kwargs, run_id = await _handle_input(user_input, agent)
@@ -48,10 +54,11 @@ async def invoke(user_input: UserInput) -> ChatMessage:
             raise ValueError(f"Unexpected response type: {response_type}")
 
         output.run_id = str(run_id)
+        output.content = redact_output(output.content) or EMPTY_RESPONSE_MESSAGE
         return output
     except Exception as e:
-        logger.error(f"An exception occurred: {e}")
-        raise HTTPException(status_code=500, detail="Unexpected error")
+        logger.exception(f"An exception occurred: {e}")
+        raise HTTPException(status_code=500, detail=user_facing_error(e))
     
 
 def _sse_response_example() -> dict[int, Any]:
@@ -74,10 +81,26 @@ async def stream(user_input: StreamInput) -> StreamingResponse:
     
     """
 
+    guard = check_user_input(user_input.message)
+    generator = (
+        message_generator(user_input)
+        if guard.allowed
+        else _single_message_stream(guard.message)
+    )
     return StreamingResponse(
-        message_generator(user_input),
+        generator,
         media_type="text/event-stream",
     )
+
+
+def _sse(payload: dict) -> str:
+    return f"data: {json.dumps(payload)}\n\n"
+
+
+async def _single_message_stream(content: str) -> AsyncGenerator[str, None]:
+    """Answer without calling the agent, e.g. when a guardrail blocked the input."""
+    yield _sse({'type': 'message', 'content': ChatMessage(type="ai", content=content).model_dump()})
+    yield _sse({'type': 'end'})
 
 
 async def _handle_input(
@@ -108,6 +131,7 @@ async def _handle_input(
     config = RunnableConfig(
         configurable=configurable,
         run_id=run_id,
+        recursion_limit=settings.AGENT_RECURSION_LIMIT,
     )
 
     # Check for interrupts that need to be resumed
@@ -138,6 +162,8 @@ async def message_generator(
     """
     agent: CompiledStateGraph = get_agent(user_input.agent_id)
     kwargs, run_id = await _handle_input(user_input, agent)
+    # Whether the user received any answer text, so we never end on a silent empty bubble
+    answered = False
 
     try:
         async for stream_event in agent.astream(
@@ -183,6 +209,9 @@ async def message_generator(
                     continue
                 if chat_message.type == "human" and chat_message.content == user_input.message:
                     continue
+                if chat_message.type == "ai":
+                    chat_message.content = redact_output(chat_message.content)
+                    answered = answered or bool(chat_message.content.strip())
                 yield f"data: {json.dumps({'type': 'message', 'content': chat_message.model_dump()})}\n\n"
 
             if stream_mode == "messages":
@@ -196,9 +225,11 @@ async def message_generator(
                     continue
                 content = remove_tool_calls(msg.content)
                 if content:
-                    yield f"data: {json.dumps({'type': 'token', 'content': convert_message_content_to_string(content)})}\n\n"
+                    token = redact_output(convert_message_content_to_string(content))
+                    answered = answered or bool(token.strip())
+                    yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
     except GeneratorExit:
-        # Handle GeneratorExit gracefully
+        # Handle GeneratorExit gracefully, the client is gone so nothing more can be yielded
         logger.info("Stream closed by client")
         return
     except CancelledError:
@@ -206,9 +237,11 @@ async def message_generator(
         logger.info("Stream cancelled")
         return
     except Exception as e:
-        logger.error(f"Error in message generator: {e}")
-        yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
-    finally:
-        yield f"data: {json.dumps({'type': 'end'})}\n\n"
+        logger.exception(f"Error in message generator: {e}")
+        yield _sse({'type': 'error', 'content': user_facing_error(e)})
+    else:
+        if not answered:
+            yield _sse({'type': 'message', 'content': ChatMessage(type="ai", content=EMPTY_RESPONSE_MESSAGE, run_id=str(run_id)).model_dump()})
+    yield _sse({'type': 'end'})
 
 

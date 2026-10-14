@@ -3,9 +3,20 @@ from api.department_routers import department_router
 from api.chat_routes import chat_router
 from api.employee_routers import employee_router
 from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
+import asyncio
+from ai.rag.handbook import handbook_retriever
 
 
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Build the handbook index in the background so the first policy question is fast
+    warm_up = asyncio.create_task(handbook_retriever.warm_up())
+    yield
+    warm_up.cancel()
+
+
+app = FastAPI(lifespan=lifespan)
 # Cross-domain is allowed. For production environments, 
 # please change * to a specific domain name
 app.add_middleware(

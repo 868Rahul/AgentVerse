@@ -11,39 +11,62 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from pydantic import BaseModel, Field
 
 from ai.llm import get_model, settings
-from ai.tools.oa_tools import get_user_department, get_user_info, search_handbook
+from ai.tools.oa_tools import get_user_department, get_user_info, list_handbook_sections, search_handbook
+from ai.guardrails import GUARDRAIL_RULES, trim_history
+from ai.resilience import EMPTY_RESPONSE_MESSAGE, is_empty_ai_message
 
 
 from langchain_core.globals import set_debug
 from langchain_core.globals import set_verbose
-set_debug(True)
+set_debug(settings.LANGCHAIN_DEBUG)
 set_verbose(False)
 
 import logging
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(filename)s[line:%(lineno)d] - %(funcName)s() - %(message)s')
+logging.basicConfig(level=logging.DEBUG if settings.LANGCHAIN_DEBUG else logging.INFO, format='%(asctime)s - %(levelname)s - %(filename)s[line:%(lineno)d] - %(funcName)s() - %(message)s')
+logger = logging.getLogger(__name__)
 
 
 class AgentState(MessagesState):
     """State of the agent."""
 
-tools = [get_user_info, get_user_department, search_handbook]
+tools = [get_user_info, get_user_department, search_handbook, list_handbook_sections]
 
 def wrap_model(model: BaseChatModel) -> RunnableSerializable[AgentState, AIMessage]:
     model = model.bind_tools(tools)
     preprocessor = RunnableLambda(
-        lambda state: [SystemMessage(content=instructions)] + state["messages"],
+        lambda state: [SystemMessage(content=build_instructions())] + trim_history(state["messages"]),
         name="StateModifier",
     )
     return preprocessor | model
 
 instructions = """
-    You are an assistant of a company's OA system, and your task is to help users query the administrative and personnel information within the company.
-    You need to use tools to query relevant information from the database and knowledge base based on the user's questions and return it to the user.
-    It is not allowed to forge the relevant regulations of the company at will to avoid misleading users out of thin air.
-    You need to answer the users' questions and ensure the accuracy and completeness of the answers.
-    You need to pay attention to the users' questions and avoid answering questions that they don't care about.
-    The current time is：{current_time}
-"""
+You are the OA (office administration) assistant of the company. You help employees with HR and company information.
+
+What you can do (tell the user this when they greet you or ask what you can do):
+1. Answer questions about company policies from the official Employee Handbook: working hours, attendance, overtime,
+   holidays, vacation, sick/personal/parental/bereavement leave, benefits and insurance, retirement plan, salary and
+   performance review, expense reimbursement, resignation and termination, harassment, confidentiality,
+   computer, e-mail and internet use.
+2. Look up an employee's details (position, department, contact, status, entry date) by name.
+3. Find which department an employee belongs to.
+
+How to answer:
+- For ANY policy or rules question, call `search_handbook` first with a short specific query, even if you think you know
+  the answer. If the first search does not answer the question, try once more with different words.
+- Base policy answers only on the handbook text you retrieved. Quote the important numbers and conditions exactly
+  and cite the page, e.g. "(Handbook, p. 15)".
+- If the handbook does not cover the topic, say so clearly instead of guessing.
+- The handbook is a template: it writes "{{ORGANIZATION NAME}}" where the company name would be. Just say "the company".
+- Use `list_handbook_sections` when the user asks what topics the handbook covers.
+- Use `get_user_info` / `get_user_department` for questions about a specific person.
+- Format answers in short Markdown: a direct answer first, then bullet points for details.
+
+The current time is: {current_time}
+""" + GUARDRAIL_RULES
+
+
+def build_instructions() -> str:
+    return instructions.format(current_time=datetime.now().strftime("%Y-%m-%d %H:%M"))
 
 
 async def call_model(state: AgentState, config: RunnableConfig) -> AgentState:
@@ -52,6 +75,13 @@ async def call_model(state: AgentState, config: RunnableConfig) -> AgentState:
     m = get_model(config["configurable"].get("model", settings.DEFAULT_MODEL))
     model_runnable = wrap_model(m)
     response = await model_runnable.ainvoke(state, config)
+
+    # Gemini sometimes finishes with neither text nor a tool call, ask once more before giving up
+    if is_empty_ai_message(response):
+        logger.warning("Model returned an empty response, retrying once")
+        response = await model_runnable.ainvoke(state, config)
+        if is_empty_ai_message(response):
+            response = AIMessage(content=EMPTY_RESPONSE_MESSAGE)
 
     return {"messages": [response]}
 
