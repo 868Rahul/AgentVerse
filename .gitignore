@@ -5,3 +5,5 @@
 /frontend/.next
 /frontend/node_modules
 /Details.docx
+/backend/resource/chroma_db/
+/resource/chroma_db/
