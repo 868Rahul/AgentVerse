@@ -10,7 +10,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.types import Command, Interrupt
 from api.schema.chatSchema import UserInput, ChatMessage, StreamInput
 from asyncio import CancelledError
-from ai.agent.agents import get_agent, DEFAULT_AGENT, CompiledStateGraph
+from ai.agent.agents import get_agent, get_all_agent_info, agents, AgentInfo, DEFAULT_AGENT, CompiledStateGraph
 from typing import Any, Union, Dict, List, Optional
 from utils.chat_utils import langchain_to_chat_message, remove_tool_calls, convert_message_content_to_string
 from ai.guardrails import check_user_input, redact_output
@@ -23,6 +23,21 @@ logger = logging.getLogger(__name__)
 
 chat_router = APIRouter(prefix="/chat", tags=["chat"],)
 
+
+@chat_router.get("/agents", response_model=list[AgentInfo])
+async def list_agents() -> list[AgentInfo]:
+    """List the available agents (key + description)."""
+    return get_all_agent_info()
+
+
+def _ensure_agent_exists(agent_id: str | None) -> None:
+    if agent_id not in agents:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Unknown agent '{agent_id}'. Available: {', '.join(agents)}",
+        )
+
+
 @chat_router.post("/invoke")
 async def invoke(user_input: UserInput) -> ChatMessage:
     """
@@ -31,6 +46,7 @@ async def invoke(user_input: UserInput) -> ChatMessage:
     If no agent_id is provided, the default proxy will be used.
     Use thread_id to persist and continue multi-turn dialogues. The run_id keyword argument will also be attached to the message for recording feedback.
     """
+    _ensure_agent_exists(user_input.agent_id)
     guard = check_user_input(user_input.message)
     if not guard.allowed:
         return ChatMessage(type="ai", content=guard.message)
@@ -80,7 +96,7 @@ async def stream(user_input: StreamInput) -> StreamingResponse:
     Stream the agent response.
     
     """
-
+    _ensure_agent_exists(user_input.agent_id)
     guard = check_user_input(user_input.message)
     generator = (
         message_generator(user_input)
@@ -166,12 +182,18 @@ async def message_generator(
     answered = False
 
     try:
+        # subgraphs=True: the multi-agent team runs every agent as a nested graph, and LangGraph only
+        # emits their LLM tokens when subgraphs are streamed. Events become (namespace, mode, data).
         async for stream_event in agent.astream(
-            **kwargs, stream_mode=["updates", "messages", "custom"]
+            **kwargs, stream_mode=["updates", "messages", "custom"], subgraphs=True
         ):
-            if not isinstance(stream_event, tuple):
+            if not isinstance(stream_event, tuple) or len(stream_event) != 3:
                 continue
-            stream_mode, event = stream_event
+            namespace, stream_mode, event = stream_event
+            # tokens come from any level; messages / custom events only from the top level graph,
+            # so the inner steps of a nested agent are not sent twice
+            if namespace and stream_mode != "messages":
+                continue
             new_messages = []
             if stream_mode == "updates":
                 for node, updates in event.items():

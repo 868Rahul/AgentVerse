@@ -12,7 +12,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 
 
 from core.config import settings
-from ai.resilience import ResilientChatGoogleGenerativeAI, build_rate_limiter
+from ai.resilience import ResilientChatGoogleGenerativeAI, build_rate_limiter, thinking_settings
 from ai.models import (
     AllModelEnum,
     DeepseekModelName,
@@ -34,6 +34,9 @@ _MODEL_TABLE = {
     GeminiModelName.GEMINI_3_6_FLASH: "gemini-3.6-flash",
     GeminiModelName.GEMINI_2_5_FLASH: "gemini-2.5-flash",
     GeminiModelName.GEMINI_2_5_FLASH_LITE: "gemini-2.5-flash-lite",
+    GeminiModelName.GEMINI_3_5_FLASH_LITE: "gemini-3.5-flash-lite",
+    GeminiModelName.GEMINI_3_1_FLASH_LITE: "gemini-3.1-flash-lite",
+    GeminiModelName.GEMINI_FLASH_LATEST: "gemini-flash-latest",
 
 }
 
@@ -106,4 +109,6 @@ def get_model(model_name: AllModelEnum, /) -> ModelT:
             max_retries=settings.GEMINI_MAX_RETRIES,
             timeout=settings.GEMINI_TIMEOUT_SECONDS,
             rate_limiter=_gemini_rate_limiter,
+            hedge_after_seconds=settings.GEMINI_HEDGE_AFTER_SECONDS or None,
+            **thinking_settings(api_model_name),
         )

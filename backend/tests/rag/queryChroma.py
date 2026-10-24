@@ -1,13 +1,16 @@
-from langchain_core.documents import Document
-
- 
+import asyncio
 import os
 import sys
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from app.ai.rag.chromaClient import hand_book_vector_store
+sys.path.append(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "app"))
+
+from ai.rag.handbook import handbook_retriever
 
 
-result = hand_book_vector_store.similarity_search("welfare", k=5)
+async def main():
+    query = " ".join(sys.argv[1:]) or "welfare"
+    for doc in await handbook_retriever.search(query, k=5):
+        print(f"--- p.{doc.metadata['page']} {doc.metadata['section']}\n{doc.page_content[:300]}\n")
 
-print(result)
+
+asyncio.run(main())

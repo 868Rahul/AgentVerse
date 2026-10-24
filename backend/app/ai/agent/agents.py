@@ -4,6 +4,7 @@ from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel, Field
 from ai.agent.oa_assistant import oa_assistant
 from ai.agent.multi_agent import supervisor_agent
+from ai.agent.weather_agent import weather_calculator_agent
 
 
 DEFAULT_AGENT = "oa-assistant"
@@ -27,8 +28,9 @@ class Agent:
 
 
 agents: dict[str, Agent] = {
-    "oa-assistant": Agent(description="A oa intelligent assistant.", graph=oa_assistant),
-    "multi-agent-supervisor": Agent(description="A supervisor for multi-agent assistant.", graph=supervisor_agent),
+    "oa-assistant": Agent(description="HR assistant: Employee Handbook policies and employee lookup.", graph=oa_assistant),
+    "weather-calculator": Agent(description="Current weather, forecasts and exact calculations.", graph=weather_calculator_agent),
+    "multi-agent-supervisor": Agent(description="Supervisor that routes to HR, weather, math, code and general agents.", graph=supervisor_agent),
 }
 
 ## Get agent by agent_id

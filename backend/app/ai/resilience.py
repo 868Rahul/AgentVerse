@@ -16,7 +16,7 @@ import logging
 import re
 import time
 import warnings
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
@@ -114,11 +114,15 @@ def build_rate_limiter() -> InMemoryRateLimiter | None:
     """Token bucket shared by every Gemini call of this process."""
     if settings.GEMINI_REQUESTS_PER_MINUTE <= 0:
         return None
-    return InMemoryRateLimiter(
+    limiter = InMemoryRateLimiter(
         requests_per_second=settings.GEMINI_REQUESTS_PER_MINUTE / 60,
-        check_every_n_seconds=0.1,
-        max_bucket_size=2,
+        check_every_n_seconds=0.05,
+        max_bucket_size=settings.GEMINI_BURST_REQUESTS,
     )
+    # The bucket starts empty, which made even the first question wait ~6 s. Start it full instead:
+    # a normal question (2-4 model calls) then never waits, only sustained bursts are slowed down.
+    limiter.available_tokens = float(settings.GEMINI_BURST_REQUESTS)
+    return limiter
 
 
 class ResilientChatGoogleGenerativeAI(ChatGoogleGenerativeAI):
@@ -131,20 +135,82 @@ class ResilientChatGoogleGenerativeAI(ChatGoogleGenerativeAI):
     """
 
     fallback_models: list[str] = Field(default_factory=list)
+    # Free tier requests sometimes sit in Google's queue for 10-30 s. If the model has not started
+    # answering after this many seconds, the same request is also sent to the next model and the
+    # first one to answer wins (a "hedged" request). None disables it.
+    hedge_after_seconds: float | None = None
 
-    def _candidates(self) -> Iterator["ResilientChatGoogleGenerativeAI"]:
+    def _candidates(self) -> list["ResilientChatGoogleGenerativeAI"]:
         names = [self.model, *[name for name in self.fallback_models if name != self.model]]
         now = time.monotonic()
         ready = [name for name in names if _model_cooldown_until.get(name, 0) <= now]
         # If every model is cooling down, still try them all rather than failing without a call
-        for name in ready or names:
-            yield self if name == self.model else self.model_copy(update={"model": name, "fallback_models": []})
+        return [
+            self if name == self.model
+            else self.model_copy(update={"model": name, "fallback_models": [], **thinking_settings(name)})
+            for name in ready or names
+        ]
 
     @staticmethod
     def _on_model_failed(model: str, error: Exception) -> None:
         cooldown = _cooldown_seconds(error)
         _model_cooldown_until[model] = time.monotonic() + cooldown
         logger.warning(f"Gemini model '{model}' failed, skipping it for {cooldown:.0f}s and trying the next model: {error}")
+
+    async def _race(self, start_attempt):
+        """
+        Run attempts on the candidate models: the next model is started when the current one fails
+        with a fallback error, or (hedging) when it is still silent after `hedge_after_seconds`.
+        `start_attempt(candidate)` returns an awaitable that resolves to the attempt's first result.
+        Returns (candidate, result, cleanup) of the winner; the losers are cancelled.
+        """
+        candidates = iter(self._candidates())
+        running: dict[asyncio.Task, tuple] = {}
+        last_error: Exception | None = None
+
+        def start_next() -> bool:
+            candidate = next(candidates, None)
+            if candidate is None:
+                return False
+            awaitable, cleanup = start_attempt(candidate)
+            running[asyncio.ensure_future(awaitable)] = (candidate, cleanup)
+            return True
+
+        async def cancel(task):
+            candidate, cleanup = running.pop(task)
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            await cleanup()
+
+        start_next()
+        try:
+            while running:
+                # hedge only while a single attempt is running, so at most two requests are in flight
+                timeout = self.hedge_after_seconds if len(running) == 1 else None
+                done, _ = await asyncio.wait(running, timeout=timeout, return_when=asyncio.FIRST_COMPLETED)
+                if not done:
+                    slow = next(iter(running.values()))[0].model
+                    if start_next():
+                        logger.info(f"Gemini model '{slow}' is slow, also asking the next model (hedged request)")
+                    else:
+                        # no other model left: just keep waiting for the running one
+                        done, _ = await asyncio.wait(running, return_when=asyncio.FIRST_COMPLETED)
+                for task in done:
+                    candidate, cleanup = running.pop(task)
+                    error = task.exception()
+                    if error is None:
+                        return candidate, task.result(), cleanup
+                    await cleanup()
+                    if not isinstance(error, _FALLBACK_ERRORS):
+                        raise error
+                    self._on_model_failed(candidate.model, error)
+                    last_error = error
+                if not running and not start_next():
+                    break
+        finally:
+            for task in list(running):
+                await cancel(task)
+        raise last_error
 
     async def _agenerate(
         self,
@@ -153,16 +219,16 @@ class ResilientChatGoogleGenerativeAI(ChatGoogleGenerativeAI):
         run_manager: AsyncCallbackManagerForLLMRun | None = None,
         **kwargs: Any,
     ) -> ChatResult:
-        last_error: Exception | None = None
-        for candidate in self._candidates():
-            try:
-                return await super(ResilientChatGoogleGenerativeAI, candidate)._agenerate(
-                    messages, stop, run_manager, **kwargs
-                )
-            except _FALLBACK_ERRORS as e:
-                self._on_model_failed(candidate.model, e)
-                last_error = e
-        raise last_error
+        async def no_cleanup():
+            return None
+
+        _, result, _ = await self._race(
+            lambda candidate: (
+                super(ResilientChatGoogleGenerativeAI, candidate)._agenerate(messages, stop, None, **kwargs),
+                no_cleanup,
+            )
+        )
+        return result
 
     async def _astream(
         self,
@@ -171,23 +237,47 @@ class ResilientChatGoogleGenerativeAI(ChatGoogleGenerativeAI):
         run_manager: AsyncCallbackManagerForLLMRun | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[ChatGenerationChunk]:
-        last_error: Exception | None = None
-        for candidate in self._candidates():
-            started = False
-            try:
-                async for chunk in super(ResilientChatGoogleGenerativeAI, candidate)._astream(
-                    messages, stop, run_manager, **kwargs
-                ):
-                    started = True
-                    yield chunk
-                return
-            except _FALLBACK_ERRORS as e:
-                # Once tokens reached the user we can't switch models without mixing answers
-                if started:
-                    raise
-                self._on_model_failed(candidate.model, e)
-                last_error = e
-        raise last_error
+        # The race is on the FIRST chunk: once a model has started answering, its stream is used
+        # and the other request is cancelled, so answers are never mixed. Token callbacks are
+        # emitted by LangChain core for the chunks yielded here, so the loser never reaches the user.
+        _END = object()
+
+        def start_attempt(candidate):
+            stream = super(ResilientChatGoogleGenerativeAI, candidate)._astream(messages, stop, None, **kwargs)
+
+            async def first_chunk():
+                try:
+                    return stream, await stream.__anext__()
+                except StopAsyncIteration:
+                    return stream, _END
+
+            async def cleanup():
+                try:
+                    await stream.aclose()
+                except Exception:
+                    pass
+
+            return first_chunk(), cleanup
+
+        candidate, (stream, first), _ = await self._race(start_attempt)
+        if first is _END:
+            return
+        yield first
+        async for chunk in stream:
+            yield chunk
+
+
+def thinking_settings(model_name: str) -> dict:
+    """
+    Reasoning settings per model family. Gemini 3 models take `thinking_level`; Gemini 2.5 Flash
+    models take `thinking_budget` (0 = off). Keeping thinking minimal keeps answers fast.
+    """
+    level = settings.GEMINI_THINKING_LEVEL or None
+    if model_name.startswith("gemini-3"):
+        return {"reasoning_effort": level, "thinking_budget": None}
+    if model_name.startswith("gemini-2.5-flash") and level == "minimal":
+        return {"reasoning_effort": None, "thinking_budget": 0}
+    return {"reasoning_effort": None, "thinking_budget": None}
 
 
 def user_facing_error(error: BaseException) -> str:

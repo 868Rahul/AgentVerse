@@ -1,43 +1,24 @@
-from langchain_core.documents import Document
+"""
+Rebuild the employee handbook index (run from the backend folder):
 
+    python tests/rag/importRag.py
 
-# backend env root dir
+The index is also built automatically when the server starts, run this after replacing the PDF.
+"""
+import asyncio
 import os
 import sys
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from app.ai.rag.chromaClient import hand_book_vector_store, client
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain.document_loaders import PyPDFLoader
+sys.path.append(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "app"))
 
+from ai.rag.handbook import handbook_retriever
 
 
-# client.delete_collection("handbook")
-
-client.get_or_create_collection("handbook")
-
-# with open("./resource/EmployeeHandbook.pdf", "r", encoding="utf-8") as f:
-#     text = f.read()
-
-documents = []
-loader = PyPDFLoader("./resource/EmployeeHandbook.pdf")
-documents.extend(loader.load())
+async def main():
+    count = await handbook_retriever.rebuild()
+    print(f"Indexed {count} handbook chunks")
+    for doc in await handbook_retriever.search("vacation", k=3):
+        print(f"- p.{doc.metadata['page']} {doc.metadata['section']}")
 
 
-text_splitter = RecursiveCharacterTextSplitter(
-    # Set a really small chunk size, just to show.
-    chunk_size=100,
-    chunk_overlap=20,
-    length_function=len,
-    is_separator_regex=False,
-)
-# docs = text_splitter.create_documents([text])
-docs = text_splitter.split_documents(documents)
-
-
-
-hand_book_vector_store.add_documents(docs)
-
-result = hand_book_vector_store.similarity_search("vacation", k=5)
-
-print(result)
+asyncio.run(main())

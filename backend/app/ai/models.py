@@ -1,7 +1,7 @@
 from enum import StrEnum
 from typing import TypeAlias
 
-DEFAULT_MODEL = "gemini-2.5-flash"
+DEFAULT_MODEL = "gemini-3.6-flash"
 
 
 class OpenAIModelName(StrEnum):
@@ -33,6 +33,9 @@ class GeminiModelName(StrEnum):
     GEMINI_3_6_FLASH = "gemini-3.6-flash"
     GEMINI_2_5_FLASH = "gemini-2.5-flash"
     GEMINI_2_5_FLASH_LITE = "gemini-2.5-flash-lite"
+    GEMINI_3_5_FLASH_LITE = "gemini-3.5-flash-lite"
+    GEMINI_3_1_FLASH_LITE = "gemini-3.1-flash-lite"
+    GEMINI_FLASH_LATEST = "gemini-flash-latest"
     
 
 

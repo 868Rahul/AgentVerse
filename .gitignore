@@ -2,7 +2,7 @@
 /backend/.venv
 /backend/.env
 
-/frontend/.next
+/frontend/dist
 /frontend/node_modules
 /Details.docx
 /backend/resource/chroma_db/

@@ -35,17 +35,27 @@ class Settings(BaseSettings):
 
     GOOGLE_API_KEY: str | None = None
 
-    DEFAULT_MODEL: str = "gemini-2.5-flash"
+    DEFAULT_MODEL: str = "gemini-3.6-flash"
 
     # Gemini free tier resilience
     # Comma separated models tried in order when the primary model is rate limited,
     # overloaded or unavailable. Free tier quotas are counted per model.
-    GEMINI_FALLBACK_MODELS: str = "gemini-3.5-flash-lite,gemini-3.1-flash-lite,gemini-flash-latest"
-    # Retries done by the Google SDK per model (including the first call) before falling back
-    GEMINI_MAX_RETRIES: int = 2
+    # (gemini-flash-latest is not listed: it took 50-80 s per call on the free tier)
+    GEMINI_FALLBACK_MODELS: str = "gemini-3.5-flash-lite,gemini-3.1-flash-lite,gemini-2.5-flash"
+    # Attempts per model (1 = no retry). Switching to the next model is faster than waiting
+    # for the same overloaded / rate limited model again.
+    GEMINI_MAX_RETRIES: int = 1
     GEMINI_TIMEOUT_SECONDS: float = 60
     # Client side throttle shared by all Gemini calls, keeps us under the free tier RPM. 0 disables it
-    GEMINI_REQUESTS_PER_MINUTE: float = 10
+    GEMINI_REQUESTS_PER_MINUTE: float = 30
+    # Calls allowed back to back before the throttle starts spacing them
+    GEMINI_BURST_REQUESTS: int = 5
+    # If a model has not started answering after this many seconds, also send the request to the
+    # next model and use whichever answers first (free tier queues are often 10-30 s). 0 disables it
+    GEMINI_HEDGE_AFTER_SECONDS: float = 6
+    # Reasoning depth: "minimal" keeps answers fast (Gemini 3: thinking_level, Gemini 2.5 Flash:
+    # thinking off). Empty = the model's own default
+    GEMINI_THINKING_LEVEL: str = "minimal"
 
     # Print every LangChain step to the console (very noisy, slows streaming down)
     LANGCHAIN_DEBUG: bool = False

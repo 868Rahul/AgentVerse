@@ -2,9 +2,10 @@ from langgraph_supervisor import create_supervisor
 from langgraph.prebuilt import create_react_agent
 from ai.llm import get_model, settings
 from langgraph.checkpoint.memory import InMemorySaver
-from langgraph_supervisor.handoff import create_forward_message_tool
+from langgraph.graph import END
 from ai.guardrails import GUARDRAIL_RULES, trim_history
 from ai.tools.oa_tools import get_user_department, get_user_info, list_handbook_sections, search_handbook
+from ai.tools.utility_tools import calculator, get_weather
 from langchain_core.messages import AIMessage, HumanMessage
 
 
@@ -53,16 +54,20 @@ hr_agent = create_react_agent(
     tools=[search_handbook, list_handbook_sections, get_user_info, get_user_department],
     name="hr_agent",
     pre_model_hook=worker_pre_model_hook,
-).with_config(tags=["skip_stream"])
+)
 
 #  Agent
 math_agent = create_react_agent(
     model=model,
-    prompt="You are a math expert. Solve the user's math question step by step and give the final result clearly." + GUARDRAIL_RULES,
-    tools=[],
+    prompt=(
+        "You are a math expert. Solve the user's math question step by step and give the final result clearly. "
+        "Use the `calculator` tool for every arithmetic step instead of computing in your head."
+        + GUARDRAIL_RULES
+    ),
+    tools=[calculator],
     name="math_agent",
     pre_model_hook=worker_pre_model_hook,
-).with_config(tags=["skip_stream"])
+)
 
 # Programming expert agent
 code_agent = create_react_agent(
@@ -71,7 +76,7 @@ code_agent = create_react_agent(
     tools=[],
     name="code_agent",
     pre_model_hook=worker_pre_model_hook,
-).with_config(tags=["skip_stream"])
+)
 
 # General agent
 general_agent = create_react_agent(
@@ -80,13 +85,28 @@ general_agent = create_react_agent(
     tools=[],
     name="general_agent",
     pre_model_hook=worker_pre_model_hook,
-).with_config(tags=["skip_stream"])
+)
 
-forwarding_tool = create_forward_message_tool("supervisor") # The argument is the name to assign to the resulting forwarded message
+# Weather agent
+weather_agent = create_react_agent(
+    model=model,
+    prompt=(
+        "You are a weather assistant. Use the `get_weather` tool for current weather and forecasts of any place "
+        "(add the country when a name is ambiguous, e.g. 'Paris, France'). Report temperature in °C, feels-like, humidity, "
+        "wind and chance of rain, and say the data is from Open-Meteo. Never invent weather data."
+        + GUARDRAIL_RULES
+    ),
+    tools=[get_weather, calculator],
+    name="weather_agent",
+    pre_model_hook=worker_pre_model_hook,
+)
+
+
+workers = [hr_agent, weather_agent, general_agent, code_agent, math_agent]
 
 # Create a supervisor
 supervisor = create_supervisor(
-    agents=[hr_agent, general_agent, code_agent, math_agent],
+    agents=workers,
     model=model,
     # full_history full message record, last_message output of the last agent
     output_mode="last_message",
@@ -95,27 +115,33 @@ supervisor = create_supervisor(
 You are the supervisor of a team of agents:
 - hr_agent: company policies and the Employee Handbook (working hours, leave, vacation, benefits, salary, conduct,
   resignation, IT/internet use ...) and questions about employees or departments.
-- math_agent: math, calculations, algebra, statistics.
+- weather_agent: current weather and forecasts for any city or place.
+- math_agent: math, calculations, percentages, algebra, statistics (has an exact calculator).
 - code_agent: programming, algorithms, debugging, code.
 - general_agent: any other general knowledge question.
 
 Rules:
 - Greetings, thanks and "what can you do?" questions: answer yourself, briefly, without delegating. Explain that the team
-  can answer company policy / HR questions from the Employee Handbook, look up employees, solve math, help with code and
-  answer general questions.
+  can answer company policy / HR questions from the Employee Handbook, look up employees, give weather forecasts,
+  calculate and solve math, help with code and answer general questions.
 - Otherwise delegate to exactly one agent; anything about the company, work rules or colleagues goes to hr_agent.
-- When the agent has answered, return its answer as it is without adding anything.
 - Only one tool can be called at a time; multiple tools cannot be called in parallel.
         """ + GUARDRAIL_RULES
     ),
 
     add_handoff_back_messages=False,
     parallel_tool_calls=False,
-    tools=[forwarding_tool],
     pre_model_hook=supervisor_pre_model_hook,
 
 )
 
 checkpointer = InMemorySaver()
+
+# By default every worker hands control back to the supervisor, which then spends one more model call
+# just to repeat the worker's answer. End the run as soon as a worker has answered instead:
+# saves a full LLM round trip per question, and the worker's answer is what the user sees.
+for worker in workers:
+    supervisor.edges.discard((worker.name, "supervisor"))
+    supervisor.add_edge(worker.name, END)
 
 supervisor_agent = supervisor.compile(checkpointer=checkpointer)
