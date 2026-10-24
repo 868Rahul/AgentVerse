@@ -1,11 +1,9 @@
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from typing import List, Annotated
+from fastapi import APIRouter, HTTPException, status
+from typing import List
 
-from db.models.department import Department
+from db.models.department import Department, DepartmentCreate
 from db.repository.department_repo import DepartmentRepository
-from db.database import get_async_session
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.database import SessionDep
 

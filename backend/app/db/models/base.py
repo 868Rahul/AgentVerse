@@ -9,7 +9,7 @@ class DBBaseModel(SQLModel):
     """
     DB base model
     """
-    create_time: datetime | None = Field(default=datetime.now, title="Created time")
-    edit_time: datetime | None = Field(default=datetime.now, title="Updated time")
+    create_time: datetime | None = Field(default_factory=datetime.now, title="Created time")
+    edit_time: datetime | None = Field(default_factory=datetime.now, title="Updated time")
     # create_by: str | None = Field(default="", title="Created by")
     # update_by: str | None = Field(default="", title="Updated by")
